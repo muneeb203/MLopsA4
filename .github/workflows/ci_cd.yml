@@ -129,7 +129,7 @@ jobs:
               run = client.create_run_from_pipeline_package(
                   "fraud_detection_pipeline.yaml",
                   arguments={"sample_frac": 0.3, "recall_threshold": 0.70},
-                  run_name=f"ci-cd-run-${{ github.sha[:8] }}",
+                  run_name=f"ci-cd-run-${{ github.run_id }}",
               )
               print(f"Pipeline run created: {run.run_id}")
           except Exception as e:
