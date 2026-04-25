@@ -1,0 +1,64 @@
+groups:
+  - name: fraud_detection_alerts
+    rules:
+
+      # ── Model Performance Alerts ──────────────────────────────────────────
+      - alert: FraudRecallDropped
+        expr: fraud_model_recall < 0.70
+        for: 2m
+        labels:
+          severity: critical
+          team: mlops
+        annotations:
+          summary: "Fraud recall dropped below threshold"
+          description: "Model recall is {{ $value | printf \"%.4f\" }}, below 0.70 threshold. Triggering retraining."
+          action: "trigger_retraining"
+
+      - alert: HighFalsePositiveRate
+        expr: fraud_false_positive_rate > 0.15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "False positive rate too high"
+          description: "FPR is {{ $value | printf \"%.4f\" }}, exceeding 0.15 limit."
+
+      # ── Data Drift Alerts ─────────────────────────────────────────────────
+      - alert: DataDriftDetected
+        expr: fraud_data_drift_score > 0.30
+        for: 3m
+        labels:
+          severity: critical
+          team: mlops
+        annotations:
+          summary: "Significant data drift detected"
+          description: "Drift score {{ $value | printf \"%.4f\" }} exceeds 0.30 threshold."
+          action: "trigger_retraining"
+
+      # ── API Performance Alerts ────────────────────────────────────────────
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(fraud_api_request_latency_seconds_bucket[5m])) > 1.0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency exceeds 1 second"
+          description: "95th percentile latency is {{ $value | printf \"%.2f\" }}s"
+
+      - alert: HighErrorRate
+        expr: rate(fraud_api_requests_total{status="500"}[5m]) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API error rate exceeds 5%"
+          description: "Error rate is {{ $value | printf \"%.4f\" }} req/s"
+
+      - alert: APIDown
+        expr: up{job="fraud-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fraud Detection API is down"
+          description: "The fraud detection API has been unreachable for 1 minute."

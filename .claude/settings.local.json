@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl --status)",
+      "Bash(wsl -l -v)",
+      "Bash(docker --version)",
+      "Bash(minikube version *)",
+      "Bash(kubectl version *)",
+      "PowerShell(minikube version)",
+      "PowerShell(kubectl version --client)",
+      "Bash(wmic computersystem *)",
+      "Bash(wmic cpu *)"
+    ]
+  }
+}

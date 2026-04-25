@@ -1,0 +1,60 @@
+{
+  "title": "Data Drift Dashboard",
+  "uid": "fraud-data-drift",
+  "tags": ["fraud", "drift", "data"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Overall Drift Score",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "targets": [{
+        "expr": "fraud_data_drift_score",
+        "legendFormat": "Drift Score"
+      }],
+      "options": {
+        "minValue": 0,
+        "maxValue": 1,
+        "thresholds": {
+          "steps": [
+            {"color": "green", "value": 0},
+            {"color": "yellow", "value": 0.2},
+            {"color": "red", "value": 0.35}
+          ]
+        }
+      },
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 2,
+      "title": "Drift Score Over Time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 16, "x": 8, "y": 0},
+      "targets": [
+        {
+          "expr": "fraud_data_drift_score",
+          "legendFormat": "Drift Score"
+        },
+        {
+          "expr": "0.30",
+          "legendFormat": "Alert Threshold"
+        }
+      ],
+      "datasource": "Prometheus"
+    },
+    {
+      "id": 3,
+      "title": "Alert Status",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 8},
+      "targets": [{
+        "expr": "ALERTS{alertname=\"DataDriftDetected\"}",
+        "legendFormat": "Drift Alert"
+      }],
+      "datasource": "Prometheus"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'webhook-retraining'
+  routes:
+    - match:
+        action: trigger_retraining
+      receiver: 'webhook-retraining'
+    - match:
+        severity: critical
+      receiver: 'webhook-retraining'
+
+receivers:
+  - name: 'webhook-retraining'
+    webhook_configs:
+      - url: 'http://fraud-api:8000/update_metrics'
+        send_resolved: true

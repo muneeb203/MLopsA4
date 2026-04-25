@@ -1,0 +1,626 @@
+# PIPELINE DEFINITION
+# Name: fraud-detection-pipeline
+# Description: IEEE CIS Fraud Detection — 7-step KFP pipeline with conditional deployment
+# Inputs:
+#    data_dir: str [Default: '/mnt/e/sem 8/MLOPs/a4/data']
+#    recall_threshold: float [Default: 0.7]
+#    sample_frac: float [Default: 0.3]
+# Outputs:
+#    data-validation-op-validation_metrics: system.Metrics
+#    evaluation-op-eval_metrics: system.Metrics
+components:
+  comp-condition-1:
+    dag:
+      tasks:
+        deployment-op:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-deployment-op
+          inputs:
+            artifacts:
+              model_artifact:
+                componentInputArtifact: pipelinechannel--training-op-model_artifact
+            parameters:
+              recall:
+                componentInputParameter: pipelinechannel--evaluation-op-Output
+              recall_threshold:
+                componentInputParameter: pipelinechannel--recall_threshold
+          taskInfo:
+            name: deployment-op
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--training-op-model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--evaluation-op-Output:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--recall_threshold:
+          parameterType: NUMBER_DOUBLE
+  comp-data-ingestion-op:
+    executorLabel: exec-data-ingestion-op
+    inputDefinitions:
+      parameters:
+        data_dir:
+          parameterType: STRING
+        sample_frac:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-data-validation-op:
+    executorLabel: exec-data-validation-op
+    inputDefinitions:
+      artifacts:
+        input_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        validation_metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: BOOLEAN
+  comp-deployment-op:
+    executorLabel: exec-deployment-op
+    inputDefinitions:
+      artifacts:
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+      parameters:
+        recall:
+          parameterType: NUMBER_DOUBLE
+        recall_threshold:
+          defaultValue: 0.7
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+  comp-evaluation-op:
+    executorLabel: exec-evaluation-op
+    inputDefinitions:
+      artifacts:
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        eval_metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-feature-engineering-op:
+    executorLabel: exec-feature-engineering-op
+    inputDefinitions:
+      artifacts:
+        input_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-preprocessing-op:
+    executorLabel: exec-preprocessing-op
+    inputDefinitions:
+      artifacts:
+        input_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        output_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-training-op:
+    executorLabel: exec-training-op
+    inputDefinitions:
+      artifacts:
+        train_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        model_artifact:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-data-ingestion-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_ingestion_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_ingestion_op(\n    data_dir: str,\n    sample_frac: float,\n\
+          \    output_dataset: Output[Dataset],\n):\n    import pandas as pd\n   \
+          \ import numpy as np\n    import os\n\n    train_t = pd.read_csv(os.path.join(data_dir,\
+          \ \"train_transaction.csv\"))\n    train_i = pd.read_csv(os.path.join(data_dir,\
+          \ \"train_identity.csv\"))\n    df = train_t.merge(train_i, on=\"TransactionID\"\
+          , how=\"left\")\n\n    fraud = df[df[\"isFraud\"] == 1]\n    legit = df[df[\"\
+          isFraud\"] == 0].sample(frac=sample_frac, random_state=42)\n    df_s = pd.concat([fraud,\
+          \ legit]).sample(frac=1, random_state=42).reset_index(drop=True)\n\n   \
+          \ df_s.to_csv(output_dataset.path, index=False)\n    print(f\"Ingested {df_s.shape[0]}\
+          \ rows. Fraud rate: {df_s['isFraud'].mean():.4f}\")\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+    exec-data-validation-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_validation_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_validation_op(\n    input_dataset: Input[Dataset],\n   \
+          \ validation_metrics: Output[Metrics],\n) -> bool:\n    import pandas as\
+          \ pd\n    import json\n\n    df = pd.read_csv(input_dataset.path)\n    required\
+          \ = [\"TransactionID\", \"isFraud\", \"TransactionAmt\", \"ProductCD\"]\n\
+          \    missing  = [c for c in required if c not in df.columns]\n\n    fraud_rate\
+          \ = float(df[\"isFraud\"].mean())\n    dupes      = int(df[\"TransactionID\"\
+          ].duplicated().sum())\n    high_miss  = int((df.isnull().mean() > 0.8).sum())\n\
+          \n    validation_metrics.log_metric(\"fraud_rate\", fraud_rate)\n    validation_metrics.log_metric(\"\
+          duplicate_ids\", dupes)\n    validation_metrics.log_metric(\"high_missing_cols\"\
+          , high_miss)\n\n    passed = len(missing) == 0 and dupes == 0\n    print(f\"\
+          Validation passed: {passed}\")\n    return passed\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+    exec-deployment-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - deployment_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef deployment_op(\n    model_artifact: Input[Model],\n    recall:\
+          \ float,\n    recall_threshold: float = 0.70,\n):\n    import shutil, os\n\
+          \n    if recall >= recall_threshold:\n        deploy_path = \"/tmp/production_model.pkl\"\
+          \n        shutil.copy(model_artifact.path + \".pkl\", deploy_path)\n   \
+          \     print(f\"DEPLOYED: recall={recall:.4f} >= threshold={recall_threshold}\"\
+          )\n    else:\n        print(f\"REJECTED: recall={recall:.4f} < threshold={recall_threshold}\"\
+          )\n        raise ValueError(f\"Model recall {recall:.4f} below threshold\
+          \ {recall_threshold}\")\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+    exec-evaluation-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluation_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluation_op(\n    test_dataset: Input[Dataset],\n    model_artifact:\
+          \ Input[Model],\n    eval_metrics: Output[Metrics],\n) -> float:\n    import\
+          \ pandas as pd\n    import pickle\n    from sklearn.metrics import recall_score,\
+          \ roc_auc_score, f1_score\n\n    df    = pd.read_csv(test_dataset.path)\n\
+          \    X     = df.drop(columns=[\"isFraud\"])\n    y     = df[\"isFraud\"\
+          ]\n\n    with open(model_artifact.path + \".pkl\", \"rb\") as f:\n     \
+          \   model = pickle.load(f)\n\n    y_pred  = model.predict(X)\n    y_proba\
+          \ = model.predict_proba(X)[:, 1]\n\n    recall  = float(recall_score(y,\
+          \ y_pred))\n    auc     = float(roc_auc_score(y, y_proba))\n    f1     \
+          \ = float(f1_score(y, y_pred))\n\n    eval_metrics.log_metric(\"recall\"\
+          ,  recall)\n    eval_metrics.log_metric(\"auc_roc\", auc)\n    eval_metrics.log_metric(\"\
+          f1\",      f1)\n\n    print(f\"Recall={recall:.4f}  AUC={auc:.4f}  F1={f1:.4f}\"\
+          )\n    return recall\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+    exec-feature-engineering-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - feature_engineering_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef feature_engineering_op(\n    input_dataset: Input[Dataset],\n\
+          \    train_dataset: Output[Dataset],\n    test_dataset: Output[Dataset],\n\
+          ):\n    import pandas as pd\n    import numpy as np\n    from sklearn.model_selection\
+          \ import train_test_split\n    from imblearn.over_sampling import SMOTE\n\
+          \n    df = pd.read_csv(input_dataset.path)\n\n    if \"TransactionAmt\"\
+          \ in df.columns:\n        df[\"TransactionAmt_log\"]    = np.log1p(df[\"\
+          TransactionAmt\"])\n        df[\"TransactionAmt_zscore\"] = (df[\"TransactionAmt\"\
+          ] - df[\"TransactionAmt\"].mean()) / (df[\"TransactionAmt\"].std() + 1e-9)\n\
+          \    if \"TransactionDT\" in df.columns:\n        df[\"hour\"]        =\
+          \ (df[\"TransactionDT\"] / 3600 % 24).astype(int)\n        df[\"day_of_week\"\
+          ] = (df[\"TransactionDT\"] / (3600 * 24) % 7).astype(int)\n        df[\"\
+          is_night\"]    = ((df[\"hour\"] < 6) | (df[\"hour\"] > 22)).astype(int)\n\
+          \n    X = df.drop(columns=[\"isFraud\"])\n    y = df[\"isFraud\"]\n    X_tr,\
+          \ X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)\n\
+          \n    smote = SMOTE(random_state=42, k_neighbors=3)\n    X_tr_s, y_tr_s\
+          \ = smote.fit_resample(X_tr, y_tr)\n\n    train_df = pd.concat([X_tr_s,\
+          \ y_tr_s], axis=1)\n    test_df  = pd.concat([X_te, y_te], axis=1)\n   \
+          \ train_df.to_csv(train_dataset.path, index=False)\n    test_df.to_csv(test_dataset.path,\
+          \ index=False)\n    print(f\"Train: {train_df.shape}, Test: {test_df.shape}\"\
+          )\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+    exec-preprocessing-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocessing_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocessing_op(\n    input_dataset: Input[Dataset],\n    output_dataset:\
+          \ Output[Dataset],\n):\n    import pandas as pd\n    import numpy as np\n\
+          \    from sklearn.impute import SimpleImputer\n    from sklearn.preprocessing\
+          \ import LabelEncoder\n\n    df = pd.read_csv(input_dataset.path)\n    thresh\
+          \ = int(0.1 * len(df))\n    df = df.dropna(thresh=thresh, axis=1)\n\n  \
+          \  target = df[\"isFraud\"].copy()\n    df = df.drop(columns=[\"isFraud\"\
+          , \"TransactionID\"], errors=\"ignore\")\n\n    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()\n\
+          \    cat_cols = df.select_dtypes(include=[\"object\"]).columns.tolist()\n\
+          \n    imp = SimpleImputer(strategy=\"median\")\n    df[num_cols] = imp.fit_transform(df[num_cols])\n\
+          \n    for col in cat_cols:\n        df[col] = df[col].fillna(\"MISSING\"\
+          )\n        if df[col].nunique() > 50:\n            freq = df[col].value_counts(normalize=True).to_dict()\n\
+          \            df[col] = df[col].map(freq).fillna(0)\n        else:\n    \
+          \        le = LabelEncoder()\n            df[col] = le.fit_transform(df[col].astype(str))\n\
+          \n    df[\"isFraud\"] = target.values\n    df.to_csv(output_dataset.path,\
+          \ index=False)\n    print(f\"Preprocessed shape: {df.shape}\")\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+    exec-training-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - training_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef training_op(\n    train_dataset: Input[Dataset],\n    model_artifact:\
+          \ Output[Model],\n):\n    import pandas as pd\n    import pickle\n    from\
+          \ xgboost import XGBClassifier\n\n    df     = pd.read_csv(train_dataset.path)\n\
+          \    X      = df.drop(columns=[\"isFraud\"])\n    y      = df[\"isFraud\"\
+          ]\n\n    model = XGBClassifier(\n        n_estimators=200, max_depth=6,\
+          \ learning_rate=0.05,\n        scale_pos_weight=8, eval_metric=\"auc\",\n\
+          \        random_state=42, use_label_encoder=False, verbosity=0,\n    )\n\
+          \    model.fit(X, y)\n\n    with open(model_artifact.path + \".pkl\", \"\
+          wb\") as f:\n        pickle.dump(model, f)\n    print(\"Model trained and\
+          \ saved.\")\n\n"
+        image: muneebqureshi03/fraud-pipeline:latest
+        resources:
+          cpuLimit: 2.0
+          memoryLimit: 4.0
+pipelineInfo:
+  description: "IEEE CIS Fraud Detection \u2014 7-step KFP pipeline with conditional\
+    \ deployment"
+  name: fraud-detection-pipeline
+root:
+  dag:
+    outputs:
+      artifacts:
+        data-validation-op-validation_metrics:
+          artifactSelectors:
+          - outputArtifactKey: validation_metrics
+            producerSubtask: data-validation-op
+        evaluation-op-eval_metrics:
+          artifactSelectors:
+          - outputArtifactKey: eval_metrics
+            producerSubtask: evaluation-op
+    tasks:
+      condition-1:
+        componentRef:
+          name: comp-condition-1
+        dependentTasks:
+        - evaluation-op
+        - training-op
+        inputs:
+          artifacts:
+            pipelinechannel--training-op-model_artifact:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: training-op
+          parameters:
+            pipelinechannel--evaluation-op-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluation-op
+            pipelinechannel--recall_threshold:
+              componentInputParameter: recall_threshold
+        taskInfo:
+          name: recall-check
+        triggerPolicy:
+          condition: inputs.parameter_values['pipelinechannel--evaluation-op-Output']
+            >= inputs.parameter_values['pipelinechannel--recall_threshold']
+      data-ingestion-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-ingestion-op
+        inputs:
+          parameters:
+            data_dir:
+              componentInputParameter: data_dir
+            sample_frac:
+              componentInputParameter: sample_frac
+        retryPolicy:
+          backoffDuration: 30s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: data-ingestion-op
+      data-validation-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-validation-op
+        dependentTasks:
+        - data-ingestion-op
+        inputs:
+          artifacts:
+            input_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: data-ingestion-op
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 1
+        taskInfo:
+          name: data-validation-op
+      evaluation-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluation-op
+        dependentTasks:
+        - feature-engineering-op
+        - training-op
+        inputs:
+          artifacts:
+            model_artifact:
+              taskOutputArtifact:
+                outputArtifactKey: model_artifact
+                producerTask: training-op
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test_dataset
+                producerTask: feature-engineering-op
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 1
+        taskInfo:
+          name: evaluation-op
+      feature-engineering-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-feature-engineering-op
+        dependentTasks:
+        - preprocessing-op
+        inputs:
+          artifacts:
+            input_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: preprocessing-op
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 1
+        taskInfo:
+          name: feature-engineering-op
+      preprocessing-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocessing-op
+        dependentTasks:
+        - data-ingestion-op
+        - data-validation-op
+        inputs:
+          artifacts:
+            input_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: output_dataset
+                producerTask: data-ingestion-op
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: preprocessing-op
+      training-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-training-op
+        dependentTasks:
+        - feature-engineering-op
+        inputs:
+          artifacts:
+            train_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: train_dataset
+                producerTask: feature-engineering-op
+        retryPolicy:
+          backoffDuration: 0s
+          backoffFactor: 2.0
+          backoffMaxDuration: 3600s
+          maxRetryCount: 2
+        taskInfo:
+          name: training-op
+  inputDefinitions:
+    parameters:
+      data_dir:
+        defaultValue: /mnt/e/sem 8/MLOPs/a4/data
+        isOptional: true
+        parameterType: STRING
+      recall_threshold:
+        defaultValue: 0.7
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      sample_frac:
+        defaultValue: 0.3
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+  outputDefinitions:
+    artifacts:
+      data-validation-op-validation_metrics:
+        artifactType:
+          schemaTitle: system.Metrics
+          schemaVersion: 0.0.1
+      evaluation-op-eval_metrics:
+        artifactType:
+          schemaTitle: system.Metrics
+          schemaVersion: 0.0.1
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.7.0

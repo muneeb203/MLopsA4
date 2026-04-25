@@ -1,0 +1,15 @@
+kfp==2.7.0
+xgboost
+lightgbm
+scikit-learn
+imbalanced-learn
+pandas
+numpy
+shap
+fastapi
+uvicorn
+prometheus-client
+matplotlib
+seaborn
+category-encoders
+scipy
